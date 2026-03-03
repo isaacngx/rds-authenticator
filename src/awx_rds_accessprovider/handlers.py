@@ -30,6 +30,7 @@ SSO_INSTANCE_ARN = 'arn:aws:sso:::instance/ssoins-7223b18c2c5ea126'
 IDENTITY_STORE_ID = 'd-9067ae954e'
 TARGET_ACCOUNT_ID = '891376986941'
 
+
 @resource.handler(Action.CREATE)
 def create_handler(
     session: Optional[SessionProxy],
@@ -38,7 +39,9 @@ def create_handler(
 ) -> ProgressEvent:
     model = request.desiredResourceState
     ssoClient = session.client("sso-admin", region_name="us-east-1")
-    identityStoreClient = session.client("identitystore", region_name="us-east-1")
+    identityStoreClient = session.client(
+        "identitystore", region_name="us-east-1"
+    )
     ssmClient = session.client("ssm", region_name="us-east-1")
 
     account_assignment = callback_context.get("account_assignment", None)
@@ -51,7 +54,9 @@ def create_handler(
             )
             ssoClient.put_inline_policy_to_permission_set(
                 InstanceArn=SSO_INSTANCE_ARN,
-                PermissionSetArn=permission_set["PermissionSet"]["PermissionSetArn"],
+                PermissionSetArn=permission_set["PermissionSet"][
+                    "PermissionSetArn"
+                ],
                 InlinePolicy=json.dumps(
                     {
                         "Version": "2012-10-17",
@@ -61,8 +66,9 @@ def create_handler(
                                 "Action": ["rds-db:connect"],
                                 "Resource": [
                                     (
-                                        f"arn:aws:rds-db:ap-southeast-1:"
-                                        f"{TARGET_ACCOUNT_ID}:dbuser:*/{model.Username}"
+                                        "arn:aws:rds-db:ap-southeast-1:"
+                                        f"{TARGET_ACCOUNT_ID}:dbuser:*/"
+                                        f"{model.Username}"
                                     )
                                 ],
                             }
@@ -79,9 +85,11 @@ def create_handler(
                     }
                 }
             )
-            account_assignment =ssoClient.create_account_assignment(
+            account_assignment = ssoClient.create_account_assignment(
                 InstanceArn=SSO_INSTANCE_ARN,
-                PermissionSetArn=permission_set['PermissionSet']['PermissionSetArn'],
+                PermissionSetArn=permission_set['PermissionSet'][
+                    'PermissionSetArn'
+                ],
                 PrincipalType='USER',
                 PrincipalId=identityStoreResponse['UserId'],
                 TargetType='AWS_ACCOUNT',
@@ -90,7 +98,9 @@ def create_handler(
         except ClientError as error:
             ssoClient.delete_permission_set(
                 InstanceArn=SSO_INSTANCE_ARN,
-                PermissionSetArn=permission_set["PermissionSet"]["PermissionSetArn"],
+                PermissionSetArn=permission_set["PermissionSet"][
+                    "PermissionSetArn"
+                ],
             )
             raise exceptions.InternalFailure(
                 f"Failed with error {error}"
@@ -99,19 +109,23 @@ def create_handler(
             message=f"Creating RDS access for user {model.Username}",
             status=OperationStatus.IN_PROGRESS,
             resourceModel=model,
-            callbackContext={"account_assignment": account_assignment["AccountAssignmentCreationStatus"]}
+            callbackContext={
+                "account_assignment": account_assignment[
+                    "AccountAssignmentCreationStatus"
+                ]
+            }
         )
     elif account_assignment["Status"] == "SUCCEEDED":
         try:
             ssmClient.put_parameter(
-            Name=f"/awx/rds/accessprovider/{model.Username}",
-            Value=json.dumps({
-                "PermissionSetArn": account_assignment["PermissionSetArn"],
-                "UserId": account_assignment["PrincipalId"]
-            }),
-            Type="String",
-            Overwrite=True
-        )
+                Name=f"/awx/rds/accessprovider/{model.Username}",
+                Value=json.dumps({
+                    "PermissionSetArn": account_assignment["PermissionSetArn"],
+                    "UserId": account_assignment["PrincipalId"]
+                }),
+                Type="String",
+                Overwrite=True
+            )
         except ClientError as error:
             raise exceptions.InternalFailure(
                 f"Failed to store parameter with error {error}"
@@ -123,10 +137,14 @@ def create_handler(
         )
     else:
         sleep(2)
-        account_assignment = ssoClient.describe_account_assignment_creation_status(
-            InstanceArn=SSO_INSTANCE_ARN,
-            AccountAssignmentCreationRequestId=account_assignment["RequestId"]
-        )["AccountAssignmentCreationStatus"]
+        account_assignment = (
+            ssoClient.describe_account_assignment_creation_status(
+                InstanceArn=SSO_INSTANCE_ARN,
+                AccountAssignmentCreationRequestId=account_assignment[
+                    "RequestId"
+                ]
+            )["AccountAssignmentCreationStatus"]
+        )
         return ProgressEvent(
             message=f"Creating RDS access for user {model.Username}",
             status=OperationStatus.IN_PROGRESS,
@@ -170,7 +188,10 @@ def delete_handler(
         return ProgressEvent(
             message=f"Deleting RDS access for user {model.Username}",
             status=OperationStatus.IN_PROGRESS,
-            callbackContext={"account_assignment": account_assignment["AccountAssignmentDeletionStatus"]}
+            callbackContext={"account_assignment": account_assignment[
+                "AccountAssignmentDeletionStatus"
+                ]
+            }
         )
     elif account_assignment["Status"] == "SUCCEEDED":
         ssoClient.delete_permission_set(
@@ -184,12 +205,16 @@ def delete_handler(
             message=f"Deleted RDS access for user {model.Username}",
             status=OperationStatus.SUCCESS,
         )
-    else: 
+    else:
         sleep(2)
-        account_assignment = ssoClient.describe_account_assignment_deletion_status(
-            InstanceArn=SSO_INSTANCE_ARN,
-            AccountAssignmentDeletionRequestId=account_assignment["RequestId"]
-        )["AccountAssignmentDeletionStatus"]
+        account_assignment = (
+            ssoClient.describe_account_assignment_deletion_status(
+                InstanceArn=SSO_INSTANCE_ARN,
+                AccountAssignmentDeletionRequestId=account_assignment[
+                    "RequestId"
+                ]
+            )["AccountAssignmentDeletionStatus"]
+        )
         return ProgressEvent(
             message=f"Deleting RDS access for user {model.Username}",
             status=OperationStatus.IN_PROGRESS,
