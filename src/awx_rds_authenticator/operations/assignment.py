@@ -1,5 +1,10 @@
-"""Account assignment operations."""
+import logging
+
 from awx_rds_authenticator.operations.state import load_resource_state
+from awx_rds_authenticator.utils.builders import build_instance_arn
+
+LOG = logging.getLogger(__name__)
+LOG.setLevel(logging.INFO)
 
 
 def create_assignments(
@@ -9,11 +14,7 @@ def create_assignments(
     permission_set_arn: str,
     username: str,
     target_accounts: set[str],
-) -> tuple[str, list[dict]]:
-    """Resolve user and create account assignments for a permission set.
-    
-    Returns (user_id, list of account assignment creation statuses).
-    """
+) -> list[dict]:
     sso_instance = sso_client.describe_instance(InstanceArn=instance_arn)
     user_id = identity_store_client.get_user_id(
         IdentityStoreId=sso_instance["IdentityStoreId"],
@@ -36,7 +37,7 @@ def create_assignments(
         )["AccountAssignmentCreationStatus"]
         for target_account in target_accounts
     ]
-    
+
     return account_assignments
 
 
@@ -44,28 +45,24 @@ def delete_assignments(
     sso_client,
     ssm_client,
     identity_store_client,
-    username: str,
-    instance_arn: str,
-) -> list[dict]:
-    """Delete account assignments for a permission set by retrieving info from SSM.
-    
-    Retrieves the stored resource state from SSM Parameter Store and deletes
-    all account assignments for the user's permission set.
-    
-    Args:
-        sso_client: SSO Admin client
-        ssm_client: SSM client
-        username: Username to look up the SSM parameter
-        instance_arn: IAM Identity Center instance ARN
-    
-    Returns the list of account assignment deletion statuses.
-    """
-    load_resource_state(ssm_client, username)
-    resource_state = load_resource_state(ssm_client, username)
-    
-    # Extract stored information
+    model,
+) -> tuple[str, list[dict]]:
+    resource_state = load_resource_state(ssm_client, model.Username)
+    instance_arn = build_instance_arn(model.IamIdentityCenterId)
     permission_set_arn = resource_state["PermissionSetArn"]
-    account_ids = [assignment["TargetId"] for assignment in resource_state["AccountAssignments"]]
+    account_assignments = (
+        resource_state["AccountAssignments"] if "AccountAssignments" in resource_state
+        else []
+    )
+
+    if not account_assignments:
+        LOG.info(f"No account assignments found in resource state for user {model.Username}")
+        return permission_set_arn, []
+
+    account_ids = {
+        account_assignment["TargetId"] for account_assignment in account_assignments 
+        if account_assignment["Status"] == "SUCCEEDED"
+    }
 
     sso_instance = sso_client.describe_instance(InstanceArn=instance_arn)
     user_id = identity_store_client.get_user_id(
@@ -73,7 +70,7 @@ def delete_assignments(
         AlternateIdentifier={
             "UniqueAttribute": {
                 "AttributePath": "Username",
-                "AttributeValue": username,
+                "AttributeValue": model.Username,
             }
         },
     )["UserId"]
@@ -92,4 +89,3 @@ def delete_assignments(
             for account_id in account_ids
         ]
     )
-
